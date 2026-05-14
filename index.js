@@ -30,80 +30,123 @@ client.on('messageCreate', async (message) => {
 
     try {
 
-        console.log('Mensagem detectada');
-
         // Ignora bots
         if (message.author.bot)
             return;
 
-        const sourceChannelId = message.channel.id;
+        // Ignora webhooks
+        if (message.webhookId)
+            return;
 
-        console.log('Canal origem:', sourceChannelId);
+        // Ignora mensagens vazias
+        if (
+            !message.content &&
+            message.attachments.size === 0
+        ) {
+            return;
+        }
+
+        console.log('========================');
+        console.log('Mensagem detectada');
+
+        const sourceChannelId =
+            message.channel.id;
+
+        console.log(
+            'Canal origem:',
+            sourceChannelId
+        );
 
         // Verifica se canal existe
         if (!channels[sourceChannelId]) {
 
-            console.log('Canal não configurado');
+            console.log(
+                'Canal não configurado'
+            );
+
             return;
         }
 
         const sourceLang =
             channels[sourceChannelId];
 
-        console.log('Idioma origem:', sourceLang);
+        console.log(
+            'Idioma origem:',
+            sourceLang
+        );
 
         // Texto original
         const originalText =
             message.content || '';
 
-        console.log('Mensagem:', originalText);
+        console.log(
+            'Mensagem:',
+            originalText
+        );
 
         // Captura anexos
         const attachments =
             [...message.attachments.values()]
                 .map(att => att.url);
 
-        console.log('Anexos:', attachments);
+        console.log(
+            'Anexos:',
+            attachments
+        );
 
         // Loop canais destino
         for (const targetChannelId in channels) {
 
-            // Ignora canal origem
-            if (targetChannelId === sourceChannelId)
+            // Ignora origem
+            if (
+                targetChannelId === sourceChannelId
+            )
                 continue;
 
             const targetLang =
                 channels[targetChannelId];
 
-            console.log('========================');
-            console.log('Traduzindo para:', targetLang);
+            console.log('------------------------');
+            console.log(
+                'Traduzindo para:',
+                targetLang
+            );
 
             try {
 
                 let translatedText = '';
 
-                // Traduz somente se houver texto
-                if (originalText.trim() !== '') {
+                // Traduz texto
+                if (
+                    originalText.trim() !== ''
+                ) {
 
-                    const response = await axios.post(
-                        'https://api-free.deepl.com/v2/translate',
-                        {
-                            text: [originalText],
-                            source_lang: sourceLang,
-                            target_lang: targetLang
-                        },
-                        {
-                            headers: {
-                                'Authorization':
-                                    `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
-                                'Content-Type':
-                                    'application/json'
+                    const response =
+                        await axios.post(
+
+                            'https://api-free.deepl.com/v2/translate',
+
+                            {
+                                text: [originalText],
+                                source_lang: sourceLang,
+                                target_lang: targetLang
+                            },
+
+                            {
+                                headers: {
+                                    'Authorization':
+                                        `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+
+                                    'Content-Type':
+                                        'application/json'
+                                }
                             }
-                        }
-                    );
+                        );
 
                     translatedText =
-                        response.data.translations[0].text;
+                        response.data
+                            .translations[0]
+                            .text;
 
                     console.log(
                         'Texto traduzido:',
@@ -128,7 +171,8 @@ client.on('messageCreate', async (message) => {
 
                 // Busca webhooks
                 let webhooks =
-                    await targetChannel.fetchWebhooks();
+                    await targetChannel
+                        .fetchWebhooks();
 
                 let webhook =
                     webhooks.find(
@@ -137,7 +181,7 @@ client.on('messageCreate', async (message) => {
                             'TranslatorWebhook'
                     );
 
-                // Cria webhook se não existir
+                // Cria webhook
                 if (!webhook) {
 
                     console.log(
@@ -145,32 +189,42 @@ client.on('messageCreate', async (message) => {
                     );
 
                     webhook =
-                        await targetChannel.createWebhook({
-                            name: 'TranslatorWebhook'
-                        });
+                        await targetChannel
+                            .createWebhook({
+                                name:
+                                    'TranslatorWebhook'
+                            });
                 }
 
-                console.log('Enviando mensagem...');
+                console.log(
+                    'Enviando mensagem...'
+                );
 
-                // Envia mensagem
+                // Envia tradução
                 await webhook.send({
 
-                    content: translatedText,
+                    content:
+                        translatedText,
 
                     username:
-                        message.member?.displayName ||
-                        message.author.username,
+                        message.member
+                            ?.displayName ||
+                        message.author
+                            .username,
 
                     avatarURL:
-                        message.author.displayAvatarURL({
-                            extension: 'png'
-                        }),
+                        message.author
+                            .displayAvatarURL({
+                                extension: 'png'
+                            }),
 
                     files: attachments
 
                 });
 
-                console.log('Mensagem enviada');
+                console.log(
+                    'Mensagem enviada'
+                );
 
             } catch (error) {
 
@@ -180,11 +234,15 @@ client.on('messageCreate', async (message) => {
 
                 if (error.response) {
 
-                    console.log(error.response.data);
+                    console.log(
+                        error.response.data
+                    );
 
                 } else {
 
-                    console.log(error.message);
+                    console.log(
+                        error.message
+                    );
                 }
 
                 console.log(
@@ -207,5 +265,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
-
+client.login(
+    process.env.DISCORD_TOKEN
+);
+```
