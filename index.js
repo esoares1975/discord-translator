@@ -36,15 +36,11 @@ client.on('messageCreate', async (message) => {
         if (message.author.bot)
             return;
 
-        // Ignora mensagens vazias
-        if (!message.content)
-            return;
-
         const sourceChannelId = message.channel.id;
 
         console.log('Canal origem:', sourceChannelId);
 
-        // Verifica se canal está configurado
+        // Verifica se canal existe
         if (!channels[sourceChannelId]) {
 
             console.log('Canal não configurado');
@@ -55,9 +51,21 @@ client.on('messageCreate', async (message) => {
             channels[sourceChannelId];
 
         console.log('Idioma origem:', sourceLang);
-        console.log('Mensagem:', message.content);
 
-        // Loop dos canais
+        // Texto original
+        const originalText =
+            message.content || '';
+
+        console.log('Mensagem:', originalText);
+
+        // Captura anexos
+        const attachments =
+            [...message.attachments.values()]
+                .map(att => att.url);
+
+        console.log('Anexos:', attachments);
+
+        // Loop canais destino
         for (const targetChannelId in channels) {
 
             // Ignora canal origem
@@ -72,32 +80,36 @@ client.on('messageCreate', async (message) => {
 
             try {
 
-                // Tradução DeepL
-                const response = await axios.post(
-                    'https://api-free.deepl.com/v2/translate',
-                    {
-                        text: [message.content],
-                        source_lang: sourceLang,
-                        target_lang: targetLang
-                    },
-                    {
-                        headers: {
-                            'Authorization':
-                                `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
-                            'Content-Type': 'application/json'
+                let translatedText = '';
+
+                // Traduz somente se houver texto
+                if (originalText.trim() !== '') {
+
+                    const response = await axios.post(
+                        'https://api-free.deepl.com/v2/translate',
+                        {
+                            text: [originalText],
+                            source_lang: sourceLang,
+                            target_lang: targetLang
+                        },
+                        {
+                            headers: {
+                                'Authorization':
+                                    `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+                                'Content-Type':
+                                    'application/json'
+                            }
                         }
-                    }
-                );
+                    );
 
-                console.log('DeepL OK');
+                    translatedText =
+                        response.data.translations[0].text;
 
-                const translatedText =
-                    response.data.translations[0].text;
-
-                console.log(
-                    'Texto traduzido:',
-                    translatedText
-                );
+                    console.log(
+                        'Texto traduzido:',
+                        translatedText
+                    );
+                }
 
                 // Busca canal destino
                 const targetChannel =
@@ -114,16 +126,18 @@ client.on('messageCreate', async (message) => {
                     continue;
                 }
 
-                // Busca webhooks existentes
+                // Busca webhooks
                 let webhooks =
                     await targetChannel.fetchWebhooks();
 
-                // Procura webhook fixo
-                let webhook = webhooks.find(
-                    wh => wh.name === 'TranslatorWebhook'
-                );
+                let webhook =
+                    webhooks.find(
+                        wh =>
+                            wh.name ===
+                            'TranslatorWebhook'
+                    );
 
-                // Cria se não existir
+                // Cria webhook se não existir
                 if (!webhook) {
 
                     console.log(
@@ -138,7 +152,7 @@ client.on('messageCreate', async (message) => {
 
                 console.log('Enviando mensagem...');
 
-                // Envia tradução
+                // Envia mensagem
                 await webhook.send({
 
                     content: translatedText,
@@ -150,7 +164,9 @@ client.on('messageCreate', async (message) => {
                     avatarURL:
                         message.author.displayAvatarURL({
                             extension: 'png'
-                        })
+                        }),
+
+                    files: attachments
 
                 });
 
