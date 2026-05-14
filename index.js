@@ -30,15 +30,19 @@ client.on('messageCreate', async (message) => {
 
     try {
 
-        // Ignora bots
-        if (message.author.bot)
+        // IGNORA O PRÓPRIO BOT
+        if (message.author.id === client.user.id)
             return;
 
-        // Ignora webhooks
+        // IGNORA WEBHOOKS
         if (message.webhookId)
             return;
 
-        // Ignora mensagens vazias
+        // IGNORA BOTS
+        if (message.author.bot)
+            return;
+
+        // IGNORA MENSAGENS VAZIAS
         if (
             !message.content &&
             message.attachments.size === 0
@@ -57,7 +61,7 @@ client.on('messageCreate', async (message) => {
             sourceChannelId
         );
 
-        // Verifica se canal existe
+        // CANAL NÃO CONFIGURADO
         if (!channels[sourceChannelId]) {
 
             console.log(
@@ -75,7 +79,7 @@ client.on('messageCreate', async (message) => {
             sourceLang
         );
 
-        // Texto original
+        // TEXTO ORIGINAL
         const originalText =
             message.content || '';
 
@@ -84,7 +88,7 @@ client.on('messageCreate', async (message) => {
             originalText
         );
 
-        // Captura anexos
+        // ANEXOS
         const attachments =
             [...message.attachments.values()]
                 .map(att => att.url);
@@ -94,10 +98,10 @@ client.on('messageCreate', async (message) => {
             attachments
         );
 
-        // Loop canais destino
+        // LOOP DESTINOS
         for (const targetChannelId in channels) {
 
-            // Ignora origem
+            // IGNORA CANAL ORIGEM
             if (
                 targetChannelId === sourceChannelId
             )
@@ -116,7 +120,7 @@ client.on('messageCreate', async (message) => {
 
                 let translatedText = '';
 
-                // Traduz texto
+                // TRADUZ TEXTO
                 if (
                     originalText.trim() !== ''
                 ) {
@@ -154,7 +158,7 @@ client.on('messageCreate', async (message) => {
                     );
                 }
 
-                // Busca canal destino
+                // BUSCA CANAL
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
@@ -169,7 +173,7 @@ client.on('messageCreate', async (message) => {
                     continue;
                 }
 
-                // Busca webhooks
+                // WEBHOOKS
                 let webhooks =
                     await targetChannel
                         .fetchWebhooks();
@@ -181,7 +185,7 @@ client.on('messageCreate', async (message) => {
                             'TranslatorWebhook'
                     );
 
-                // Cria webhook
+                // CRIA WEBHOOK
                 if (!webhook) {
 
                     console.log(
@@ -200,7 +204,7 @@ client.on('messageCreate', async (message) => {
                     'Enviando mensagem...'
                 );
 
-                // Envia tradução
+                // ENVIA
                 await webhook.send({
 
                     content:
@@ -268,4 +272,4 @@ client.on('messageCreate', async (message) => {
 client.login(
     process.env.DISCORD_TOKEN
 );
-```
+
