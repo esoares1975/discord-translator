@@ -8,11 +8,16 @@ app.get('/', (req, res) => {
     res.send('Bot online!');
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-app.listen(PORT, () => {
-    console.log(`Servidor web ativo na porta ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+
+    console.log(
+        `Servidor web ativo na porta ${PORT}`
+    );
+
 });
+
 
 const {
     Client,
