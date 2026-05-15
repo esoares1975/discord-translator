@@ -18,7 +18,6 @@ app.listen(PORT, '0.0.0.0', () => {
 
 });
 
-
 const {
     Client,
     GatewayIntentBits
@@ -29,6 +28,7 @@ const axios = require('axios');
 const channels = require('./channels.json');
 
 const client = new Client({
+
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -36,9 +36,98 @@ const client = new Client({
     ]
 });
 
-// MAPA:
-// mensagem original -> mensagens traduzidas
+// ========================
+// CONFIG
+// ========================
+
+const MAX_FILE_SIZE = 20000000;
+
 const translatedMessages = new Map();
+
+// ========================
+// FUNÇÕES
+// ========================
+
+function sleep(ms) {
+
+    return new Promise(resolve =>
+        setTimeout(resolve, ms)
+    );
+}
+
+// Tradução com retry
+async function translateText(
+    text,
+    sourceLang,
+    targetLang
+) {
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+
+        try {
+
+            console.log(
+                `[DeepL] ${sourceLang} -> ${targetLang}`
+            );
+
+            const response =
+                await axios.post(
+
+                    'https://api-free.deepl.com/v2/translate',
+
+                    {
+                        text: [text],
+                        source_lang: sourceLang,
+                        target_lang: targetLang
+                    },
+
+                    {
+                        headers: {
+                            'Authorization':
+                                `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+
+                            'Content-Type':
+                                'application/json'
+                        },
+
+                        timeout: 15000
+                    }
+                );
+
+            return response.data
+                .translations[0]
+                .text;
+
+        } catch (error) {
+
+            console.log(
+                `Tentativa ${attempt} falhou`
+            );
+
+            if (error.response) {
+
+                console.log(
+                    error.response.data
+                );
+
+            } else {
+
+                console.log(
+                    error.message
+                );
+            }
+
+            if (attempt === 3)
+                throw error;
+
+            await sleep(3000);
+        }
+    }
+}
+
+// ========================
+// BOT ONLINE
+// ========================
 
 client.once('clientReady', () => {
 
@@ -49,16 +138,29 @@ client.once('clientReady', () => {
 
 });
 
+// ========================
+// NOVAS MENSAGENS
+// ========================
+
 client.on('messageCreate', async (message) => {
 
     try {
 
-        // Ignora bots/webhooks
+        // Ignora bots
         if (message.author.bot)
             return;
 
+        // Ignora webhooks
         if (message.webhookId)
             return;
+
+        // Ignora próprio bot
+        if (
+            message.author.id ===
+            client.user.id
+        ) {
+            return;
+        }
 
         // Ignora vazio
         if (
@@ -68,87 +170,118 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
+        console.log('========================');
+        console.log('Mensagem detectada');
+
         const sourceChannelId =
             message.channel.id;
 
+        console.log(
+            'Canal origem:',
+            sourceChannelId
+        );
+
         // Canal não configurado
-        if (!channels[sourceChannelId])
+        if (!channels[sourceChannelId]) {
+
+            console.log(
+                'Canal não configurado'
+            );
+
             return;
+        }
 
         const sourceLang =
             channels[sourceChannelId];
 
+        console.log(
+            'Idioma origem:',
+            sourceLang
+        );
+
         const originalText =
             message.content || '';
 
-        // Anexos
+        console.log(
+            'Texto:',
+            originalText
+        );
+
+        // Filtra anexos grandes
         const attachments =
             [...message.attachments.values()]
+                .filter(att =>
+                    att.size < MAX_FILE_SIZE
+                )
                 .map(att => att.url);
 
-        // Lista mensagens traduzidas
+        console.log(
+            'Anexos:',
+            attachments.length
+        );
+
+        // Salva mensagens criadas
         const createdMessages = [];
 
         // Loop canais
         for (const targetChannelId in channels) {
 
+            // Ignora canal origem
             if (
-                targetChannelId === sourceChannelId
-            )
+                targetChannelId ===
+                sourceChannelId
+            ) {
                 continue;
+            }
+
+            // Delay anti-rate-limit
+            await sleep(1200);
 
             const targetLang =
                 channels[targetChannelId];
+
+            console.log('------------------------');
+            console.log(
+                `Destino: ${targetLang}`
+            );
 
             try {
 
                 let translatedText = '';
 
-                // Traduz
+                // Traduz texto
                 if (
                     originalText.trim() !== ''
                 ) {
 
-                    const response =
-                        await axios.post(
-
-                            'https://api-free.deepl.com/v2/translate',
-
-                            {
-                                text: [originalText],
-                                source_lang: sourceLang,
-                                target_lang: targetLang
-                            },
-
-                            {
-                                headers: {
-                                    'Authorization':
-                                        `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
-
-                                    'Content-Type':
-                                        'application/json'
-                                }
-                            }
-                        );
-
                     translatedText =
-                        response.data
-                            .translations[0]
-                            .text;
+                        await translateText(
+
+                            originalText,
+                            sourceLang,
+                            targetLang
+                        );
                 }
 
-                // Canal destino
+                // Busca canal
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
                     );
 
-                if (!targetChannel)
-                    continue;
+                if (!targetChannel) {
 
-                // Webhook
+                    console.log(
+                        'Canal não encontrado'
+                    );
+
+                    continue;
+                }
+
+                // Busca webhooks
                 let webhooks =
-                    await targetChannel.fetchWebhooks();
+                    await targetChannel
+                        .fetchWebhooks();
 
                 let webhook =
                     webhooks.find(
@@ -157,7 +290,12 @@ client.on('messageCreate', async (message) => {
                             'TranslatorWebhook'
                     );
 
+                // Cria webhook
                 if (!webhook) {
+
+                    console.log(
+                        'Criando webhook...'
+                    );
 
                     webhook =
                         await targetChannel
@@ -191,8 +329,13 @@ client.on('messageCreate', async (message) => {
                         wait: true
                     });
 
-                // Salva mensagem traduzida
+                console.log(
+                    'Mensagem enviada'
+                );
+
+                // Salva referência
                 createdMessages.push({
+
                     channelId:
                         targetChannelId,
 
@@ -203,14 +346,31 @@ client.on('messageCreate', async (message) => {
             } catch (error) {
 
                 console.log(
-                    'ERRO:',
-                    error.message
+                    '========== ERRO DESTINO =========='
+                );
+
+                if (error.response) {
+
+                    console.log(
+                        error.response.data
+                    );
+
+                } else {
+
+                    console.log(
+                        error.message
+                    );
+                }
+
+                console.log(
+                    '=================================='
                 );
             }
         }
 
-        // Salva mapeamento
+        // Salva relação
         translatedMessages.set(
+
             message.id,
             createdMessages
         );
@@ -218,16 +378,28 @@ client.on('messageCreate', async (message) => {
     } catch (error) {
 
         console.log(
-            'ERRO GERAL:',
-            error.message
+            '========== ERRO GERAL =========='
+        );
+
+        console.log(error);
+
+        console.log(
+            '================================'
         );
     }
 });
 
+// ========================
 // APAGAR TRADUÇÕES
+// ========================
+
 client.on('messageDelete', async (message) => {
 
     try {
+
+        console.log(
+            'Mensagem original apagada'
+        );
 
         const translations =
             translatedMessages.get(
@@ -285,6 +457,10 @@ client.on('messageDelete', async (message) => {
         );
     }
 });
+
+// ========================
+// LOGIN
+// ========================
 
 client.login(
     process.env.DISCORD_TOKEN
