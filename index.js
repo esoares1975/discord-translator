@@ -8,8 +8,10 @@ app.get('/', (req, res) => {
     res.send('Bot online!');
 });
 
-app.listen(3000, () => {
-    console.log('Servidor web ativo');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Servidor web ativo na porta ${PORT}`);
 });
 
 const {
@@ -29,6 +31,10 @@ const client = new Client({
     ]
 });
 
+// MAPA:
+// mensagem original -> mensagens traduzidas
+const translatedMessages = new Map();
+
 client.once('clientReady', () => {
 
     console.log('========================');
@@ -42,19 +48,14 @@ client.on('messageCreate', async (message) => {
 
     try {
 
-        // IGNORA O PRÓPRIO BOT
-        if (message.author.id === client.user.id)
-            return;
-
-        // IGNORA WEBHOOKS
-        if (message.webhookId)
-            return;
-
-        // IGNORA BOTS
+        // Ignora bots/webhooks
         if (message.author.bot)
             return;
 
-        // IGNORA MENSAGENS VAZIAS
+        if (message.webhookId)
+            return;
+
+        // Ignora vazio
         if (
             !message.content &&
             message.attachments.size === 0
@@ -62,58 +63,30 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
-        console.log('========================');
-        console.log('Mensagem detectada');
-
         const sourceChannelId =
             message.channel.id;
 
-        console.log(
-            'Canal origem:',
-            sourceChannelId
-        );
-
-        // CANAL NÃO CONFIGURADO
-        if (!channels[sourceChannelId]) {
-
-            console.log(
-                'Canal não configurado'
-            );
-
+        // Canal não configurado
+        if (!channels[sourceChannelId])
             return;
-        }
 
         const sourceLang =
             channels[sourceChannelId];
 
-        console.log(
-            'Idioma origem:',
-            sourceLang
-        );
-
-        // TEXTO ORIGINAL
         const originalText =
             message.content || '';
 
-        console.log(
-            'Mensagem:',
-            originalText
-        );
-
-        // ANEXOS
+        // Anexos
         const attachments =
             [...message.attachments.values()]
                 .map(att => att.url);
 
-        console.log(
-            'Anexos:',
-            attachments
-        );
+        // Lista mensagens traduzidas
+        const createdMessages = [];
 
-        // LOOP DESTINOS
+        // Loop canais
         for (const targetChannelId in channels) {
 
-            // IGNORA CANAL ORIGEM
             if (
                 targetChannelId === sourceChannelId
             )
@@ -122,17 +95,11 @@ client.on('messageCreate', async (message) => {
             const targetLang =
                 channels[targetChannelId];
 
-            console.log('------------------------');
-            console.log(
-                'Traduzindo para:',
-                targetLang
-            );
-
             try {
 
                 let translatedText = '';
 
-                // TRADUZ TEXTO
+                // Traduz
                 if (
                     originalText.trim() !== ''
                 ) {
@@ -163,32 +130,20 @@ client.on('messageCreate', async (message) => {
                         response.data
                             .translations[0]
                             .text;
-
-                    console.log(
-                        'Texto traduzido:',
-                        translatedText
-                    );
                 }
 
-                // BUSCA CANAL
+                // Canal destino
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
                     );
 
-                if (!targetChannel) {
-
-                    console.log(
-                        'Canal destino não encontrado'
-                    );
-
+                if (!targetChannel)
                     continue;
-                }
 
-                // WEBHOOKS
+                // Webhook
                 let webhooks =
-                    await targetChannel
-                        .fetchWebhooks();
+                    await targetChannel.fetchWebhooks();
 
                 let webhook =
                     webhooks.find(
@@ -197,12 +152,7 @@ client.on('messageCreate', async (message) => {
                             'TranslatorWebhook'
                     );
 
-                // CRIA WEBHOOK
                 if (!webhook) {
-
-                    console.log(
-                        'Criando webhook...'
-                    );
 
                     webhook =
                         await targetChannel
@@ -212,71 +162,121 @@ client.on('messageCreate', async (message) => {
                             });
                 }
 
-                console.log(
-                    'Enviando mensagem...'
-                );
+                // Envia mensagem
+                const sentMessage =
+                    await webhook.send({
 
-                // ENVIA
-                await webhook.send({
+                        content:
+                            translatedText,
 
-                    content:
-                        translatedText,
+                        username:
+                            message.member
+                                ?.displayName ||
+                            message.author
+                                .username,
 
-                    username:
-                        message.member
-                            ?.displayName ||
-                        message.author
-                            .username,
+                        avatarURL:
+                            message.author
+                                .displayAvatarURL({
+                                    extension: 'png'
+                                }),
 
-                    avatarURL:
-                        message.author
-                            .displayAvatarURL({
-                                extension: 'png'
-                            }),
+                        files: attachments,
 
-                    files: attachments
+                        wait: true
+                    });
 
+                // Salva mensagem traduzida
+                createdMessages.push({
+                    channelId:
+                        targetChannelId,
+
+                    messageId:
+                        sentMessage.id
                 });
-
-                console.log(
-                    'Mensagem enviada'
-                );
 
             } catch (error) {
 
                 console.log(
-                    '========== ERRO TRADUÇÃO =========='
-                );
-
-                if (error.response) {
-
-                    console.log(
-                        error.response.data
-                    );
-
-                } else {
-
-                    console.log(
-                        error.message
-                    );
-                }
-
-                console.log(
-                    '==================================='
+                    'ERRO:',
+                    error.message
                 );
             }
         }
 
+        // Salva mapeamento
+        translatedMessages.set(
+            message.id,
+            createdMessages
+        );
+
     } catch (error) {
 
         console.log(
-            '========== ERRO GERAL =========='
+            'ERRO GERAL:',
+            error.message
+        );
+    }
+});
+
+// APAGAR TRADUÇÕES
+client.on('messageDelete', async (message) => {
+
+    try {
+
+        const translations =
+            translatedMessages.get(
+                message.id
+            );
+
+        if (!translations)
+            return;
+
+        for (const translation of translations) {
+
+            try {
+
+                const channel =
+                    await client.channels.fetch(
+                        translation.channelId
+                    );
+
+                if (!channel)
+                    continue;
+
+                const msg =
+                    await channel.messages.fetch(
+                        translation.messageId
+                    );
+
+                if (msg) {
+
+                    await msg.delete();
+
+                    console.log(
+                        'Mensagem traduzida apagada'
+                    );
+                }
+
+            } catch (err) {
+
+                console.log(
+                    'Erro ao apagar:',
+                    err.message
+                );
+            }
+        }
+
+        // Remove do mapa
+        translatedMessages.delete(
+            message.id
         );
 
-        console.log(error);
+    } catch (error) {
 
         console.log(
-            '================================'
+            'ERRO DELETE:',
+            error.message
         );
     }
 });
@@ -284,4 +284,3 @@ client.on('messageCreate', async (message) => {
 client.login(
     process.env.DISCORD_TOKEN
 );
-
