@@ -4,23 +4,34 @@ const express = require('express');
 
 const app = express();
 
-app.get('/', (req, res) => {
-    res.send('Bot online!');
-});
-
 const PORT = process.env.PORT || 8080;
+
+// ========================
+// SERVIDOR WEB (Fly.io)
+// ========================
+
+app.get('/', (req, res) => {
+
+    res.send('Bot online');
+
+});
 
 app.listen(PORT, '0.0.0.0', () => {
 
-    console.log(
-        `Servidor web ativo na porta ${PORT}`
-    );
+    console.log('========================');
+    console.log(`Servidor web ativo`);
+    console.log(`Porta: ${PORT}`);
+    console.log('========================');
 
 });
 
+// ========================
+// DISCORD
+// ========================
+
 const {
     Client,
-    GatewayIntentBits
+    Intents
 } = require('discord.js');
 
 const axios = require('axios');
@@ -30,9 +41,8 @@ const channels = require('./channels.json');
 const client = new Client({
 
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        Intents.FLAGS.GUILDS,
+        Intents.FLAGS.GUILD_MESSAGES
     ]
 });
 
@@ -55,7 +65,10 @@ function sleep(ms) {
     );
 }
 
-// Tradução com retry
+// ========================
+// DEEPL TRANSLATE
+// ========================
+
 async function translateText(
     text,
     sourceLang,
@@ -129,12 +142,49 @@ async function translateText(
 // BOT ONLINE
 // ========================
 
-client.once('clientReady', () => {
+client.once('ready', () => {
 
     console.log('========================');
     console.log('BOT ONLINE');
     console.log(client.user.tag);
     console.log('========================');
+
+});
+
+// ========================
+// EVENTOS CONEXÃO
+// ========================
+
+client.on('disconnect', () => {
+
+    console.log(
+        'Bot desconectado'
+    );
+
+});
+
+client.on('reconnecting', () => {
+
+    console.log(
+        'Reconectando...'
+    );
+
+});
+
+client.on('resume', () => {
+
+    console.log(
+        'Conexão restaurada'
+    );
+
+});
+
+client.on('error', (error) => {
+
+    console.log(
+        'ERRO DISCORD:',
+        error
+    );
 
 });
 
@@ -299,35 +349,33 @@ client.on('messageCreate', async (message) => {
 
                     webhook =
                         await targetChannel
-                            .createWebhook({
-                                name:
-                                    'TranslatorWebhook'
-                            });
+                            .createWebhook(
+                                'TranslatorWebhook'
+                            );
                 }
 
                 // Envia mensagem
                 const sentMessage =
-                    await webhook.send({
+                    await webhook.send(
 
-                        content:
-                            translatedText,
+                        translatedText || ' ',
 
-                        username:
-                            message.member
-                                ?.displayName ||
-                            message.author
-                                .username,
+                        {
+                            username:
+                                message.member
+                                    ?.displayName ||
+                                message.author
+                                    .username,
 
-                        avatarURL:
-                            message.author
-                                .displayAvatarURL({
-                                    extension: 'png'
-                                }),
+                            avatarURL:
+                                message.author
+                                    .displayAvatarURL({
+                                        dynamic: true
+                                    }),
 
-                        files: attachments,
-
-                        wait: true
-                    });
+                            files: attachments
+                        }
+                    );
 
                 console.log(
                     'Mensagem enviada'
