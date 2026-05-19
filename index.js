@@ -1,14 +1,14 @@
 require('dotenv').config();
 
+// ========================
+// EXPRESS (FLY.IO KEEPALIVE)
+// ========================
+
 const express = require('express');
 
 const app = express();
 
 const PORT = process.env.PORT || 8080;
-
-// ========================
-// SERVIDOR WEB (Fly.io)
-// ========================
 
 app.get('/', (req, res) => {
 
@@ -19,8 +19,8 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
 
     console.log('========================');
-    console.log(`Servidor web ativo`);
-    console.log(`Porta: ${PORT}`);
+    console.log('SERVIDOR WEB ONLINE');
+    console.log(`PORTA ${PORT}`);
     console.log('========================');
 
 });
@@ -31,18 +31,26 @@ app.listen(PORT, '0.0.0.0', () => {
 
 const {
     Client,
-    Intents
+    GatewayIntentBits
 } = require('discord.js');
 
 const axios = require('axios');
 
 const channels = require('./channels.json');
 
+// ========================
+// CLIENT
+// ========================
+
 const client = new Client({
 
     intents: [
-        Intents.FLAGS.GUILDS,
-        Intents.FLAGS.GUILD_MESSAGES
+
+        GatewayIntentBits.Guilds,
+
+        GatewayIntentBits.GuildMessages,
+
+        GatewayIntentBits.MessageContent
     ]
 });
 
@@ -55,7 +63,7 @@ const MAX_FILE_SIZE = 20000000;
 const translatedMessages = new Map();
 
 // ========================
-// FUNÇÕES
+// SLEEP
 // ========================
 
 function sleep(ms) {
@@ -66,7 +74,7 @@ function sleep(ms) {
 }
 
 // ========================
-// DEEPL TRANSLATE
+// TRANSLATE FUNCTION
 // ========================
 
 async function translateText(
@@ -96,6 +104,7 @@ async function translateText(
 
                     {
                         headers: {
+
                             'Authorization':
                                 `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
 
@@ -139,10 +148,10 @@ async function translateText(
 }
 
 // ========================
-// BOT ONLINE
+// BOT READY
 // ========================
 
-client.once('ready', () => {
+client.once('clientReady', () => {
 
     console.log('========================');
     console.log('BOT ONLINE');
@@ -152,7 +161,7 @@ client.once('ready', () => {
 });
 
 // ========================
-// EVENTOS CONEXÃO
+// CONNECTION EVENTS
 // ========================
 
 client.on('disconnect', () => {
@@ -189,7 +198,7 @@ client.on('error', (error) => {
 });
 
 // ========================
-// NOVAS MENSAGENS
+// MESSAGE CREATE
 // ========================
 
 client.on('messageCreate', async (message) => {
@@ -204,7 +213,7 @@ client.on('messageCreate', async (message) => {
         if (message.webhookId)
             return;
 
-        // Ignora próprio bot
+        // Ignora o próprio bot
         if (
             message.author.id ===
             client.user.id
@@ -270,7 +279,7 @@ client.on('messageCreate', async (message) => {
             attachments.length
         );
 
-        // Salva mensagens criadas
+        // Salva mensagens traduzidas
         const createdMessages = [];
 
         // Loop canais
@@ -284,7 +293,7 @@ client.on('messageCreate', async (message) => {
                 continue;
             }
 
-            // Delay anti-rate-limit
+            // Delay anti rate limit
             await sleep(1200);
 
             const targetLang =
@@ -313,7 +322,7 @@ client.on('messageCreate', async (message) => {
                         );
                 }
 
-                // Busca canal
+                // Busca canal destino
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
@@ -335,6 +344,7 @@ client.on('messageCreate', async (message) => {
 
                 let webhook =
                     webhooks.find(
+
                         wh =>
                             wh.name ===
                             'TranslatorWebhook'
@@ -349,33 +359,35 @@ client.on('messageCreate', async (message) => {
 
                     webhook =
                         await targetChannel
-                            .createWebhook(
-                                'TranslatorWebhook'
-                            );
+                            .createWebhook({
+
+                                name:
+                                    'TranslatorWebhook'
+                            });
                 }
 
                 // Envia mensagem
                 const sentMessage =
-                    await webhook.send(
+                    await webhook.send({
 
-                        translatedText || ' ',
+                        content:
+                            translatedText || ' ',
 
-                        {
-                            username:
-                                message.member
-                                    ?.displayName ||
-                                message.author
-                                    .username,
+                        username:
+                            message.member
+                                ?.displayName ||
+                            message.author
+                                .username,
 
-                            avatarURL:
-                                message.author
-                                    .displayAvatarURL({
-                                        dynamic: true
-                                    }),
+                        avatarURL:
+                            message.author
+                                .displayAvatarURL({
 
-                            files: attachments
-                        }
-                    );
+                                    extension: 'png'
+                                }),
+
+                        files: attachments
+                    });
 
                 console.log(
                     'Mensagem enviada'
@@ -438,7 +450,7 @@ client.on('messageCreate', async (message) => {
 });
 
 // ========================
-// APAGAR TRADUÇÕES
+// DELETE MESSAGE
 // ========================
 
 client.on('messageDelete', async (message) => {
@@ -492,7 +504,7 @@ client.on('messageDelete', async (message) => {
             }
         }
 
-        // Remove do mapa
+        // Remove mapa
         translatedMessages.delete(
             message.id
         );
