@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for discord-translator-1es-ha on 2026-05-15T13:59:48Z
+# fly.toml app configuration file generated for discord-translator-0wukka on 2026-05-19T13:57:20Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'discord-translator-1es-ha'
+app = 'discord-translator-0wukka'
 primary_region = 'ams'
 
 [build]
