@@ -1,19 +1,47 @@
 require('dotenv').config();
 
-// ========================================
-// EXPRESS SERVER (FLY.IO)
-// ========================================
+process.on('unhandledRejection', console.error);
+process.on('uncaughtException', console.error);
 
+const fs = require('fs');
 const express = require('express');
 
-const app = express();
+const {
+    Client,
+    GatewayIntentBits,
+    Partials,
+    WebhookClient
+} = require('discord.js');
+
+const fetch = (...args) =>
+    import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
+/* =======================================================
+   CONFIG
+======================================================= */
 
 const PORT = process.env.PORT || 8080;
 
+const CHANNELS = {
+    "PORTUGUES_CHANNEL_ID": "PT-BR",
+    "ENGLISH_CHANNEL_ID": "EN",
+    "SPANISH_CHANNEL_ID": "ES",
+    "FRENCH_CHANNEL_ID": "FR",
+    "ITALIAN_CHANNEL_ID": "IT",
+    "GERMAN_CHANNEL_ID": "DE",
+    "ARABIC_CHANNEL_ID": "AR"
+};
+
+const MESSAGE_DB = './messages.json';
+
+/* =======================================================
+   EXPRESS
+======================================================= */
+
+const app = express();
+
 app.get('/', (req, res) => {
-
-    res.send('Bot online');
-
+    res.send('Translator Bot Online');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -22,139 +50,171 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log('SERVIDOR WEB ONLINE');
     console.log(`PORTA ${PORT}`);
     console.log('========================');
-
 });
 
-// ========================================
-// DISCORD
-// ========================================
-
-const {
-    Client,
-    GatewayIntentBits
-} = require('discord.js');
-
-const axios = require('axios');
-
-const channels = require('./channels.json');
-
-// ========================================
-// CLIENT
-// ========================================
+/* =======================================================
+   DISCORD CLIENT
+======================================================= */
 
 const client = new Client({
-
     intents: [
-
         GatewayIntentBits.Guilds,
-
         GatewayIntentBits.GuildMessages,
-
-        GatewayIntentBits.MessageContent,
-
-        GatewayIntentBits.GuildWebhooks
+        GatewayIntentBits.MessageContent
+    ],
+    partials: [
+        Partials.Message,
+        Partials.Channel,
+        Partials.Reaction
     ]
 });
 
-// ========================================
-// CONFIG
-// ========================================
+/* =======================================================
+   DATABASE
+======================================================= */
 
-const MAX_FILE_SIZE = 20000000;
+let messageDB = {};
 
-// Armazena relação:
-// mensagem original -> mensagens traduzidas
+if (fs.existsSync(MESSAGE_DB)) {
 
-const translatedMessages = new Map();
+    try {
 
-// ========================================
-// SLEEP
-// ========================================
+        messageDB = JSON.parse(
+            fs.readFileSync(MESSAGE_DB, 'utf8')
+        );
 
-function sleep(ms) {
+    } catch {
+
+        messageDB = {};
+    }
+}
+
+function saveDB() {
+
+    fs.writeFileSync(
+        MESSAGE_DB,
+        JSON.stringify(messageDB, null, 2)
+    );
+}
+
+/* =======================================================
+   HELPERS
+======================================================= */
+
+function wait(ms) {
 
     return new Promise(resolve =>
         setTimeout(resolve, ms)
     );
 }
 
-// ========================================
-// TRANSLATE
-// ========================================
+/* =======================================================
+   TRANSLATE
+======================================================= */
 
-async function translateText(
-    text,
-    sourceLang,
-    targetLang
-) {
+async function translateText(text, targetLang) {
+
+    if (!text || text.trim() === '') {
+        return '';
+    }
 
     for (let attempt = 1; attempt <= 3; attempt++) {
 
         try {
 
             console.log(
-                `[DeepL] ${sourceLang} -> ${targetLang}`
+                `[DeepL] ${targetLang} tentativa ${attempt}`
             );
 
-            const response =
-                await axios.post(
-
-                    'https://api-free.deepl.com/v2/translate',
-
-                    {
-                        text: [text],
-                        source_lang: sourceLang,
-                        target_lang: targetLang
+            const response = await fetch(
+                'https://api-free.deepl.com/v2/translate',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization':
+                            `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+                        'Content-Type': 'application/json'
                     },
-
-                    {
-                        headers: {
-
-                            'Authorization':
-                                `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
-
-                            'Content-Type':
-                                'application/json'
-                        },
-
-                        timeout: 15000
-                    }
-                );
-
-            return response.data
-                .translations[0]
-                .text;
-
-        } catch (error) {
-
-            console.log(
-                `Tentativa ${attempt} falhou`
+                    body: JSON.stringify({
+                        text: [text],
+                        target_lang: targetLang
+                    })
+                }
             );
 
-            if (error.response) {
+            if (!response.ok) {
 
                 console.log(
-                    error.response.data
+                    `[DeepL ERROR] ${response.status}`
                 );
 
-            } else {
+                await wait(3000);
 
-                console.log(
-                    error.message
-                );
+                continue;
             }
 
-            if (attempt === 3)
-                throw error;
+            const data = await response.json();
 
-            await sleep(3000);
+            if (
+                data.translations &&
+                data.translations.length > 0
+            ) {
+
+                return data.translations[0].text;
+            }
+
+        } catch (err) {
+
+            console.log(
+                `[DeepL FAIL] tentativa ${attempt}`
+            );
+
+            console.log(err);
+
+            await wait(3000);
         }
     }
+
+    return text;
 }
 
-// ========================================
-// READY
-// ========================================
+/* =======================================================
+   WEBHOOK CACHE
+======================================================= */
+
+const webhookCache = {};
+
+async function getWebhook(channel) {
+
+    if (webhookCache[channel.id]) {
+        return webhookCache[channel.id];
+    }
+
+    const hooks = await channel.fetchWebhooks();
+
+    let hook = hooks.find(
+        h => h.name === 'TranslatorBot'
+    );
+
+    if (!hook) {
+
+        hook = await channel.createWebhook({
+            name: 'TranslatorBot'
+        });
+    }
+
+    webhookCache[channel.id] =
+        new WebhookClient({
+            id: hook.id,
+            token: hook.token
+        });
+
+    return webhookCache[channel.id];
+}
+
+/* =======================================================
+   READY
+======================================================= */
 
 client.once('clientReady', () => {
 
@@ -162,526 +222,315 @@ client.once('clientReady', () => {
     console.log('BOT ONLINE');
     console.log(client.user.tag);
     console.log('========================');
-
 });
 
-// ========================================
-// CONNECTION EVENTS
-// ========================================
-
-client.on('disconnect', () => {
-
-    console.log(
-        'Bot desconectado'
-    );
-
-});
-
-client.on('reconnecting', () => {
-
-    console.log(
-        'Reconectando...'
-    );
-
-});
-
-client.on('resume', () => {
-
-    console.log(
-        'Conexão restaurada'
-    );
-
-});
-
-client.on('error', (error) => {
-
-    console.log(
-        'ERRO DISCORD:',
-        error
-    );
-
-});
-
-// ========================================
-// CREATE MESSAGE
-// ========================================
+/* =======================================================
+   MESSAGE CREATE
+======================================================= */
 
 client.on('messageCreate', async (message) => {
 
     try {
 
-        if (message.author.bot)
-            return;
+        if (message.author.bot) return;
 
-        if (message.webhookId)
-            return;
+        if (!CHANNELS[message.channel.id]) return;
 
-        if (
-            message.author.id ===
-            client.user.id
-        ) {
-            return;
+        console.log(
+            `[MSG] ${message.author.username}`
+        );
+
+        if (!messageDB[message.id]) {
+            messageDB[message.id] = {};
         }
 
-        if (
-            !message.content &&
-            message.attachments.size === 0
-        ) {
-            return;
-        }
-
-        console.log('========================');
-        console.log('NOVA MENSAGEM');
-        console.log('========================');
-
-        const sourceChannelId =
-            message.channel.id;
-
-        if (!channels[sourceChannelId]) {
-
-            console.log(
-                'Canal não configurado'
-            );
-
-            return;
-        }
-
-        const sourceLang =
-            channels[sourceChannelId];
-
-        const originalText =
-            message.content || '';
-
-        // ========================================
-        // ATTACHMENTS
-        // ========================================
-
-        const attachments =
-            [...message.attachments.values()]
-                .filter(att =>
-                    att.size < MAX_FILE_SIZE
-                )
-                .map(att => att.url);
-
-        // ========================================
-        // SAVE RELATIONS
-        // ========================================
-
-        const createdMessages = [];
-
-        // ========================================
-        // LOOP DESTINATION CHANNELS
-        // ========================================
-
-        for (const targetChannelId in channels) {
-
-            if (
-                targetChannelId ===
-                sourceChannelId
-            ) {
-                continue;
-            }
-
-            await sleep(1200);
-
-            const targetLang =
-                channels[targetChannelId];
+        for (const [targetChannelId, targetLang]
+            of Object.entries(CHANNELS)) {
 
             try {
 
-                let translatedText = '';
-
                 if (
-                    originalText.trim() !== ''
-                ) {
-
-                    translatedText =
-                        await translateText(
-
-                            originalText,
-                            sourceLang,
-                            targetLang
-                        );
-                }
+                    targetChannelId === message.channel.id
+                ) continue;
 
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
                     );
 
-                if (!targetChannel)
-                    continue;
+                if (!targetChannel) continue;
 
-                // ========================================
-                // WEBHOOK
-                // ========================================
-
-                let webhooks =
-                    await targetChannel
-                        .fetchWebhooks();
-
-                let webhook =
-                    webhooks.find(
-
-                        wh =>
-                            wh.name ===
-                            'TranslatorWebhook'
+                const translatedText =
+                    await translateText(
+                        message.content,
+                        targetLang
                     );
 
-                if (!webhook) {
+                const webhook =
+                    await getWebhook(targetChannel);
 
-                    webhook =
-                        await targetChannel
-                            .createWebhook({
+                let replyMessageId = null;
 
-                                name:
-                                    'TranslatorWebhook'
-                            });
+                /* ==========================
+                   REPLY SUPPORT
+                ========================== */
+
+                if (message.reference?.messageId) {
+
+                    const referenced =
+                        messageDB[
+                            message.reference.messageId
+                        ];
+
+                    if (
+                        referenced &&
+                        referenced[targetChannelId]
+                    ) {
+
+                        replyMessageId =
+                            referenced[targetChannelId];
+                    }
                 }
 
-                // ========================================
-                // SEND
-                // ========================================
+                /* ==========================
+                   ATTACHMENTS
+                ========================== */
 
-                const sentMessage =
-                    await webhook.send({
+                const files = [];
 
-                        content:
-                            translatedText || ' ',
-
-                        username:
-                            message.member
-                                ?.displayName ||
-                            message.author
-                                .username,
-
-                        avatarURL:
-                            message.author
-                                .displayAvatarURL({
-
-                                    extension: 'png'
-                                }),
-
-                        files: attachments
-                    });
-
-                console.log(
-                    `Mensagem enviada (${targetLang})`
-                );
-
-                // ========================================
-                // SAVE
-                // ========================================
-
-                createdMessages.push({
-
-                    channelId:
-                        targetChannelId,
-
-                    messageId:
-                        sentMessage.id
+                message.attachments.forEach(att => {
+                    files.push(att.url);
                 });
 
-            } catch (error) {
+                /* ==========================
+                   SEND WITH RETRY
+                ========================== */
 
-                console.log(
-                    'ERRO DESTINO:',
-                    error.message
-                );
-            }
-        }
+                let sentMessage = null;
 
-        translatedMessages.set(
-
-            message.id,
-            createdMessages
-        );
-
-    } catch (error) {
-
-        console.log(
-            'ERRO CREATE:',
-            error.message
-        );
-    }
-});
-
-// ========================================
-// UPDATE MESSAGE
-// ========================================
-
-client.on('messageUpdate', async (oldMessage, newMessage) => {
-
-    try {
-
-        if (!newMessage.author)
-            return;
-
-        if (newMessage.author.bot)
-            return;
-
-        console.log('========================');
-        console.log('MENSAGEM EDITADA');
-        console.log('========================');
-
-        const translations =
-            translatedMessages.get(
-                newMessage.id
-            );
-
-        if (!translations)
-            return;
-
-        const sourceChannelId =
-            newMessage.channel.id;
-
-        const sourceLang =
-            channels[sourceChannelId];
-
-        const attachments =
-            [...newMessage.attachments.values()]
-                .filter(att =>
-                    att.size < MAX_FILE_SIZE
-                )
-                .map(att => att.url);
-
-        // ========================================
-        // DELETE OLD TRANSLATIONS
-        // ========================================
-
-        for (const translation of translations) {
-
-            try {
-
-                const channel =
-                    await client.channels.fetch(
-                        translation.channelId
-                    );
-
-                if (!channel)
-                    continue;
-
-                const msg =
-                    await channel.messages.fetch(
-                        translation.messageId
-                    );
-
-                if (msg) {
-
-                    await msg.delete();
-
-                }
-
-            } catch (err) {
-
-                console.log(
-                    'Erro delete old:',
-                    err.message
-                );
-            }
-        }
-
-        // ========================================
-        // CREATE NEW TRANSLATIONS
-        // ========================================
-
-        const recreatedMessages = [];
-
-        for (const targetChannelId in channels) {
-
-            if (
-                targetChannelId ===
-                sourceChannelId
-            ) {
-                continue;
-            }
-
-            await sleep(1200);
-
-            try {
-
-                const targetLang =
-                    channels[targetChannelId];
-
-                let translatedText = '';
-
-                if (
-                    newMessage.content &&
-                    newMessage.content.trim() !== ''
+                for (
+                    let attempt = 1;
+                    attempt <= 3;
+                    attempt++
                 ) {
 
-                    translatedText =
-                        await translateText(
+                    try {
 
-                            newMessage.content,
-                            sourceLang,
-                            targetLang
+                        console.log(
+                            `[SEND ${targetLang}] tentativa ${attempt}`
                         );
-                }
 
-                const targetChannel =
-                    await client.channels.fetch(
-                        targetChannelId
-                    );
+                        sentMessage =
+                            await webhook.send({
 
-                if (!targetChannel)
-                    continue;
+                                content:
+                                    translatedText || ' ',
 
-                let webhooks =
-                    await targetChannel
-                        .fetchWebhooks();
+                                username:
+                                    message.member?.displayName
+                                    || message.author.username,
 
-                let webhook =
-                    webhooks.find(
+                                avatarURL:
+                                    message.author.displayAvatarURL(),
 
-                        wh =>
-                            wh.name ===
-                            'TranslatorWebhook'
-                    );
+                                files,
 
-                if (!webhook) {
+                                allowedMentions: {
+                                    parse: []
+                                },
 
-                    webhook =
-                        await targetChannel
-                            .createWebhook({
-
-                                name:
-                                    'TranslatorWebhook'
+                                ...(replyMessageId
+                                    ? {
+                                        reply: {
+                                            messageReference:
+                                                replyMessageId
+                                        }
+                                    }
+                                    : {})
                             });
+
+                        break;
+
+                    } catch (err) {
+
+                        console.log(
+                            `[SEND FAIL] ${targetLang}`
+                        );
+
+                        console.log(err);
+
+                        await wait(5000);
+                    }
                 }
 
-                const newTranslatedMessage =
-                    await webhook.send({
-
-                        content:
-                            translatedText || ' ',
-
-                        username:
-                            newMessage.member
-                                ?.displayName ||
-                            newMessage.author
-                                .username,
-
-                        avatarURL:
-                            newMessage.author
-                                .displayAvatarURL({
-
-                                    extension: 'png'
-                                }),
-
-                        files: attachments
-                    });
-
-                recreatedMessages.push({
-
-                    channelId:
-                        targetChannelId,
-
-                    messageId:
-                        newTranslatedMessage.id
-                });
-
-                console.log(
-                    `Mensagem atualizada (${targetLang})`
-                );
-
-            } catch (err) {
-
-                console.log(
-                    'Erro update:',
-                    err.message
-                );
-            }
-        }
-
-        // Atualiza mapa
-        translatedMessages.set(
-
-            newMessage.id,
-            recreatedMessages
-        );
-
-    } catch (error) {
-
-        console.log(
-            'ERRO UPDATE:',
-            error.message
-        );
-    }
-});
-
-// ========================================
-// DELETE MESSAGE
-// ========================================
-
-client.on('messageDelete', async (message) => {
-
-    try {
-
-        console.log(
-            'Mensagem original apagada'
-        );
-
-        const translations =
-            translatedMessages.get(
-                message.id
-            );
-
-        if (!translations)
-            return;
-
-        for (const translation of translations) {
-
-            try {
-
-                const channel =
-                    await client.channels.fetch(
-                        translation.channelId
-                    );
-
-                if (!channel)
-                    continue;
-
-                const msg =
-                    await channel.messages.fetch(
-                        translation.messageId
-                    );
-
-                if (msg) {
-
-                    await msg.delete();
+                if (!sentMessage) {
 
                     console.log(
-                        'Mensagem traduzida apagada'
+                        `[FALHA FINAL] ${targetLang}`
                     );
+
+                    continue;
                 }
+
+                messageDB[message.id][targetChannelId] =
+                    sentMessage.id;
+
+                saveDB();
+
+                await wait(1200);
 
             } catch (err) {
 
                 console.log(
-                    'Erro delete:',
-                    err.message
+                    `[CHANNEL ERROR] ${targetLang}`
                 );
+
+                console.log(err);
             }
         }
 
-        translatedMessages.delete(
-            message.id
-        );
+    } catch (err) {
 
-    } catch (error) {
-
-        console.log(
-            'ERRO DELETE:',
-            error.message
-        );
+        console.log('MESSAGE CREATE ERROR');
+        console.log(err);
     }
 });
 
-// ========================================
-// LOGIN
-// ========================================
+/* =======================================================
+   MESSAGE UPDATE
+======================================================= */
 
-client.login(
-    process.env.DISCORD_TOKEN
+client.on(
+    'messageUpdate',
+    async (oldMessage, newMessage) => {
+
+        try {
+
+            if (newMessage.author?.bot) return;
+
+            const translations =
+                messageDB[newMessage.id];
+
+            if (!translations) return;
+
+            for (
+                const [targetChannelId, translatedMessageId]
+                of Object.entries(translations)
+            ) {
+
+                try {
+
+                    const targetChannel =
+                        await client.channels.fetch(
+                            targetChannelId
+                        );
+
+                    if (!targetChannel) continue;
+
+                    const translatedText =
+                        await translateText(
+                            newMessage.content,
+                            CHANNELS[targetChannelId]
+                        );
+
+                    const targetMessage =
+                        await targetChannel.messages.fetch(
+                            translatedMessageId
+                        );
+
+                    if (!targetMessage) continue;
+
+                    await targetMessage.edit({
+                        content:
+                            translatedText || ' '
+                    });
+
+                    await wait(1000);
+
+                } catch (err) {
+
+                    console.log(
+                        '[UPDATE FAIL]'
+                    );
+
+                    console.log(err);
+                }
+            }
+
+        } catch (err) {
+
+            console.log(
+                'MESSAGE UPDATE ERROR'
+            );
+
+            console.log(err);
+        }
+    }
 );
+
+/* =======================================================
+   MESSAGE DELETE
+======================================================= */
+
+client.on(
+    'messageDelete',
+    async (message) => {
+
+        try {
+
+            const translations =
+                messageDB[message.id];
+
+            if (!translations) return;
+
+            for (
+                const [targetChannelId, translatedMessageId]
+                of Object.entries(translations)
+            ) {
+
+                try {
+
+                    const targetChannel =
+                        await client.channels.fetch(
+                            targetChannelId
+                        );
+
+                    if (!targetChannel) continue;
+
+                    const targetMessage =
+                        await targetChannel.messages.fetch(
+                            translatedMessageId
+                        );
+
+                    if (targetMessage) {
+                        await targetMessage.delete();
+                    }
+
+                } catch (err) {
+
+                    console.log(
+                        '[DELETE FAIL]'
+                    );
+                }
+            }
+
+            delete messageDB[message.id];
+
+            saveDB();
+
+        } catch (err) {
+
+            console.log(
+                'MESSAGE DELETE ERROR'
+            );
+
+            console.log(err);
+        }
+    }
+);
+
+/* =======================================================
+   LOGIN
+======================================================= */
+
+client.login(process.env.DISCORD_TOKEN);
