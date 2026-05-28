@@ -13,7 +13,6 @@ const {
     WebhookClient
 } = require('discord.js');
 
-
 /* =======================================================
    CONFIG
 ======================================================= */
@@ -58,6 +57,10 @@ app.listen(PORT, '0.0.0.0', () => {
 ======================================================= */
 
 const client = new Client({
+
+    rest: {
+        timeout: 60000
+    },
 
     intents: [
         GatewayIntentBits.Guilds,
@@ -193,46 +196,69 @@ const webhookCache = {};
 
 async function getWebhook(channel) {
 
-    try {
+    for (let attempt = 1; attempt <= 3; attempt++) {
 
-        if (webhookCache[channel.id]) {
-            return webhookCache[channel.id];
-        }
-
-        const hooks =
-            await channel.fetchWebhooks();
-
-        let hook = hooks.find(
-            h => h.name === 'TranslatorBot'
-        );
-
-        if (!hook) {
+        try {
 
             console.log(
-                `[WEBHOOK] criando ${channel.id}`
+                `[WEBHOOK] tentativa ${attempt} canal ${channel.id}`
             );
 
-            hook =
-                await channel.createWebhook({
-                    name: 'TranslatorBot'
+            if (webhookCache[channel.id]) {
+
+                return webhookCache[channel.id];
+            }
+
+            const hooks =
+                await channel.fetchWebhooks();
+
+            let hook = hooks.find(
+                h => h.name === 'TranslatorBot'
+            );
+
+            if (!hook) {
+
+                console.log(
+                    `[WEBHOOK] criando webhook ${channel.id}`
+                );
+
+                hook =
+                    await channel.createWebhook({
+                        name: 'TranslatorBot'
+                    });
+            }
+
+            const webhook =
+                new WebhookClient({
+                    id: hook.id,
+                    token: hook.token
                 });
+
+            webhookCache[channel.id] = webhook;
+
+            console.log(
+                `[WEBHOOK OK] ${channel.id}`
+            );
+
+            return webhook;
+
+        } catch (err) {
+
+            console.log(
+                `[WEBHOOK FAIL] tentativa ${attempt}`
+            );
+
+            console.log(err);
+
+            await wait(5000);
         }
-
-        webhookCache[channel.id] =
-            new WebhookClient({
-                id: hook.id,
-                token: hook.token
-            });
-
-        return webhookCache[channel.id];
-
-    } catch (err) {
-
-        console.log('[WEBHOOK ERROR]');
-        console.log(err);
-
-        return null;
     }
+
+    console.log(
+        `[WEBHOOK ERRO FINAL] ${channel.id}`
+    );
+
+    return null;
 }
 
 /* =======================================================
@@ -255,29 +281,15 @@ client.on('messageCreate', async (message) => {
 
     try {
 
+        if (message.author.bot) return;
+
+        if (!CHANNELS[message.channel.id]) return;
+
         console.log('========================');
         console.log('NOVA MENSAGEM');
         console.log('Canal:', message.channel.id);
         console.log('Autor:', message.author.username);
-        console.log('Conteúdo:', message.content);
         console.log('========================');
-
-        if (message.author.bot) {
-
-            console.log('[IGNORADO] BOT');
-
-            return;
-        }
-
-        if (!CHANNELS[message.channel.id]) {
-
-            console.log(
-                '[IGNORADO] Canal não configurado:',
-                message.channel.id
-            );
-
-            return;
-        }
 
         if (!messageDB[message.id]) {
             messageDB[message.id] = {};
@@ -292,23 +304,12 @@ client.on('messageCreate', async (message) => {
                     targetChannelId === message.channel.id
                 ) continue;
 
-                console.log(
-                    `[PROCESSANDO] ${targetLang}`
-                );
-
                 const targetChannel =
                     await client.channels.fetch(
                         targetChannelId
                     );
 
-                if (!targetChannel) {
-
-                    console.log(
-                        '[ERRO] Canal destino não encontrado'
-                    );
-
-                    continue;
-                }
+                if (!targetChannel) continue;
 
                 const translatedText =
                     await translateText(
@@ -316,21 +317,10 @@ client.on('messageCreate', async (message) => {
                         targetLang
                     );
 
-                console.log(
-                    `[TRADUZIDO] ${translatedText}`
-                );
-
                 const webhook =
                     await getWebhook(targetChannel);
 
-                if (!webhook) {
-
-                    console.log(
-                        '[ERRO] webhook null'
-                    );
-
-                    continue;
-                }
+                if (!webhook) continue;
 
                 const files = [];
 
@@ -347,10 +337,6 @@ client.on('messageCreate', async (message) => {
                 ) {
 
                     try {
-
-                        console.log(
-                            `[ENVIANDO] ${targetLang} tentativa ${attempt}`
-                        );
 
                         sentMessage =
                             await webhook.send({
@@ -372,10 +358,6 @@ client.on('messageCreate', async (message) => {
                                 }
                             });
 
-                        console.log(
-                            `[ENVIADO] ${targetLang}`
-                        );
-
                         break;
 
                     } catch (err) {
@@ -390,21 +372,14 @@ client.on('messageCreate', async (message) => {
                     }
                 }
 
-                if (!sentMessage) {
-
-                    console.log(
-                        `[FALHA FINAL] ${targetLang}`
-                    );
-
-                    continue;
-                }
+                if (!sentMessage) continue;
 
                 messageDB[message.id][targetChannelId] =
                     sentMessage.id;
 
                 saveDB();
 
-                await wait(1200);
+                await wait(1500);
 
             } catch (err) {
 
@@ -479,10 +454,6 @@ client.on(
                             translatedText || ' '
                     });
 
-                    console.log(
-                        `[EDITADO] ${targetChannelId}`
-                    );
-
                     await wait(1000);
 
                 } catch (err) {
@@ -547,10 +518,6 @@ client.on(
                     if (targetMessage) {
 
                         await targetMessage.delete();
-
-                        console.log(
-                            `[DELETADO] ${targetChannelId}`
-                        );
                     }
 
                 } catch (err) {
