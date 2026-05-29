@@ -73,18 +73,6 @@ const client = new Client({
         Partials.Channel
     ],
 
-    makeCache: manager => {
-
-        if (
-            manager.name === 'MessageManager'
-        ) {
-
-            return new Map();
-        }
-
-        return undefined;
-    },
-
     sweepers: {
 
         messages: {
@@ -386,13 +374,13 @@ client.on(
             ) return;
 
             if (
-                !CHANNELS[
-                    message.channel.id
-                ]
+                message.webhookId
             ) return;
 
             if (
-                message.webhookId
+                !CHANNELS[
+                    message.channel.id
+                ]
             ) return;
 
             console.log(
