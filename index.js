@@ -73,7 +73,17 @@ const client = new Client({
         Partials.Channel
     ],
 
-    makeCache: () => new Map(),
+    makeCache: manager => {
+
+        if (
+            manager.name === 'MessageManager'
+        ) {
+
+            return new Map();
+        }
+
+        return undefined;
+    },
 
     sweepers: {
 
@@ -381,6 +391,10 @@ client.on(
                 ]
             ) return;
 
+            if (
+                message.webhookId
+            ) return;
+
             console.log(
                 `[MSG] ${message.author.username}`
             );
@@ -449,11 +463,25 @@ client.on(
                         }
                     );
 
+                    let replyText = '';
+
+                    if (
+                        message.reference?.messageId
+                    ) {
+
+                        replyText =
+                            '↪ Resposta a uma mensagem\n\n';
+                    }
+
                     const sentMessage =
                         await webhook.send({
 
                             content:
-                                translatedText || ' ',
+                                replyText +
+                                (
+                                    translatedText ||
+                                    ' '
+                                ),
 
                             username:
                                 message.member
