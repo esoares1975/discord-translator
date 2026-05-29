@@ -59,7 +59,7 @@ app.listen(PORT, '0.0.0.0', () => {
 const client = new Client({
 
     rest: {
-        timeout: 60000
+        timeout: 30000
     },
 
     intents: [
@@ -70,9 +70,18 @@ const client = new Client({
 
     partials: [
         Partials.Message,
-        Partials.Channel,
-        Partials.Reaction
-    ]
+        Partials.Channel
+    ],
+
+    makeCache: () => new Map(),
+
+    sweepers: {
+
+        messages: {
+            interval: 300,
+            lifetime: 600
+        }
+    }
 });
 
 /* =======================================================
@@ -85,9 +94,13 @@ if (fs.existsSync(MESSAGE_DB)) {
 
     try {
 
-        messageDB = JSON.parse(
-            fs.readFileSync(MESSAGE_DB, 'utf8')
-        );
+        messageDB =
+            JSON.parse(
+                fs.readFileSync(
+                    MESSAGE_DB,
+                    'utf8'
+                )
+            );
 
     } catch {
 
@@ -99,9 +112,48 @@ function saveDB() {
 
     fs.writeFileSync(
         MESSAGE_DB,
-        JSON.stringify(messageDB, null, 2)
+        JSON.stringify(
+            messageDB,
+            null,
+            2
+        )
     );
 }
+
+/* =======================================================
+   AUTO CLEAN DATABASE
+======================================================= */
+
+setInterval(() => {
+
+    try {
+
+        const keys =
+            Object.keys(messageDB);
+
+        if (keys.length > 5000) {
+
+            console.log(
+                '[LIMPEZA] messages.json'
+            );
+
+            const remove =
+                keys.slice(0, 1000);
+
+            for (const key of remove) {
+
+                delete messageDB[key];
+            }
+
+            saveDB();
+        }
+
+    } catch (err) {
+
+        console.log(err);
+    }
+
+}, 1000 * 60 * 10);
 
 /* =======================================================
    HELPERS
@@ -118,37 +170,49 @@ function wait(ms) {
    TRANSLATE
 ======================================================= */
 
-async function translateText(text, targetLang) {
+async function translateText(
+    text,
+    targetLang
+) {
 
-    if (!text || text.trim() === '') {
+    if (!text || !text.trim()) {
         return '';
     }
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (
+        let attempt = 1;
+        attempt <= 2;
+        attempt++
+    ) {
 
         try {
 
             console.log(
-                `[DeepL] ${targetLang} tentativa ${attempt}`
+                `[DeepL] ${targetLang}`
             );
 
-            const response = await fetch(
-                'https://api-free.deepl.com/v2/translate',
-                {
-                    method: 'POST',
+            const response =
+                await fetch(
+                    'https://api-free.deepl.com/v2/translate',
+                    {
 
-                    headers: {
-                        'Authorization':
-                            `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
+                        method: 'POST',
 
-                    body: JSON.stringify({
-                        text: [text],
-                        target_lang: targetLang
-                    })
-                }
-            );
+                        headers: {
+                            'Authorization':
+                                `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+                            'Content-Type':
+                                'application/json'
+                        },
+
+                        body: JSON.stringify({
+
+                            text: [text],
+                            target_lang:
+                                targetLang
+                        })
+                    }
+                );
 
             if (!response.ok) {
 
@@ -156,34 +220,35 @@ async function translateText(text, targetLang) {
                     `[DeepL ERROR] ${response.status}`
                 );
 
-                await wait(3000);
+                await wait(1000);
 
                 continue;
             }
 
-            const data = await response.json();
+            const data =
+                await response.json();
 
             if (
                 data.translations &&
-                data.translations.length > 0
+                data.translations.length
             ) {
 
-                return data.translations[0].text;
+                return data
+                    .translations[0]
+                    .text;
             }
 
         } catch (err) {
 
             console.log(
-                `[DeepL FAIL] tentativa ${attempt}`
+                '[DeepL FAIL]'
             );
 
             console.log(err);
 
-            await wait(3000);
+            await wait(1000);
         }
     }
-
-    console.log('[DeepL] FALHA FINAL');
 
     return text;
 }
@@ -192,214 +257,251 @@ async function translateText(text, targetLang) {
    WEBHOOK CACHE
 ======================================================= */
 
-const webhookCache = {};
+const webhookCache = new Map();
 
 async function getWebhook(channel) {
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
 
-        try {
+        if (
+            webhookCache.has(
+                channel.id
+            )
+        ) {
 
-            console.log(
-                `[WEBHOOK] tentativa ${attempt} canal ${channel.id}`
+            return webhookCache.get(
+                channel.id
             );
-
-            if (webhookCache[channel.id]) {
-
-                return webhookCache[channel.id];
-            }
-
-            const hooks =
-                await channel.fetchWebhooks();
-
-            let hook = hooks.find(
-                h => h.name === 'TranslatorBot'
-            );
-
-            if (!hook) {
-
-                console.log(
-                    `[WEBHOOK] criando webhook ${channel.id}`
-                );
-
-                hook =
-                    await channel.createWebhook({
-                        name: 'TranslatorBot'
-                    });
-            }
-
-            const webhook =
-                new WebhookClient({
-                    id: hook.id,
-                    token: hook.token
-                });
-
-            webhookCache[channel.id] = webhook;
-
-            console.log(
-                `[WEBHOOK OK] ${channel.id}`
-            );
-
-            return webhook;
-
-        } catch (err) {
-
-            console.log(
-                `[WEBHOOK FAIL] tentativa ${attempt}`
-            );
-
-            console.log(err);
-
-            await wait(5000);
         }
+
+        const hooks =
+            await channel.fetchWebhooks();
+
+        let hook =
+            hooks.find(
+                h =>
+                    h.name ===
+                    'TranslatorBot'
+            );
+
+        if (!hook) {
+
+            hook =
+                await channel.createWebhook({
+
+                    name:
+                        'TranslatorBot'
+                });
+        }
+
+        const webhook =
+            new WebhookClient({
+
+                id: hook.id,
+                token: hook.token
+            });
+
+        webhookCache.set(
+            channel.id,
+            webhook
+        );
+
+        if (
+            webhookCache.size > 20
+        ) {
+
+            const firstKey =
+                webhookCache
+                    .keys()
+                    .next()
+                    .value;
+
+            webhookCache.delete(
+                firstKey
+            );
+        }
+
+        return webhook;
+
+    } catch (err) {
+
+        console.log(
+            '[WEBHOOK ERROR]'
+        );
+
+        console.log(err);
+
+        return null;
     }
-
-    console.log(
-        `[WEBHOOK ERRO FINAL] ${channel.id}`
-    );
-
-    return null;
 }
 
 /* =======================================================
    READY
 ======================================================= */
 
-client.once('clientReady', () => {
+client.once(
+    'clientReady',
+    () => {
 
-    console.log('========================');
-    console.log('BOT ONLINE');
-    console.log(client.user.tag);
-    console.log('========================');
-});
+        console.log(
+            '========================'
+        );
+
+        console.log(
+            'BOT ONLINE'
+        );
+
+        console.log(
+            client.user.tag
+        );
+
+        console.log(
+            '========================'
+        );
+    }
+);
 
 /* =======================================================
    MESSAGE CREATE
 ======================================================= */
 
-client.on('messageCreate', async (message) => {
+client.on(
+    'messageCreate',
+    async (message) => {
 
-    try {
+        try {
 
-        if (message.author.bot) return;
+            if (
+                message.author.bot
+            ) return;
 
-        if (!CHANNELS[message.channel.id]) return;
+            if (
+                !CHANNELS[
+                    message.channel.id
+                ]
+            ) return;
 
-        console.log('========================');
-        console.log('NOVA MENSAGEM');
-        console.log('Canal:', message.channel.id);
-        console.log('Autor:', message.author.username);
-        console.log('========================');
+            console.log(
+                `[MSG] ${message.author.username}`
+            );
 
-        if (!messageDB[message.id]) {
-            messageDB[message.id] = {};
-        }
+            if (
+                !messageDB[
+                    message.id
+                ]
+            ) {
 
-        for (const [targetChannelId, targetLang]
-            of Object.entries(CHANNELS)) {
+                messageDB[
+                    message.id
+                ] = {};
+            }
 
-            try {
+            for (
+                const [
+                    targetChannelId,
+                    targetLang
+                ]
+                of Object.entries(
+                    CHANNELS
+                )
+            ) {
 
-                if (
-                    targetChannelId === message.channel.id
-                ) continue;
+                try {
 
-                const targetChannel =
-                    await client.channels.fetch(
-                        targetChannelId
-                    );
+                    if (
+                        targetChannelId ===
+                        message.channel.id
+                    ) continue;
 
-                if (!targetChannel) continue;
-
-                const translatedText =
-                    await translateText(
-                        message.content,
-                        targetLang
-                    );
-
-                const webhook =
-                    await getWebhook(targetChannel);
-
-                if (!webhook) continue;
-
-                const files = [];
-
-                message.attachments.forEach(att => {
-                    files.push(att.url);
-                });
-
-                let sentMessage = null;
-
-                for (
-                    let attempt = 1;
-                    attempt <= 3;
-                    attempt++
-                ) {
-
-                    try {
-
-                        sentMessage =
-                            await webhook.send({
-
-                                content:
-                                    translatedText || ' ',
-
-                                username:
-                                    message.member?.displayName
-                                    || message.author.username,
-
-                                avatarURL:
-                                    message.author.displayAvatarURL(),
-
-                                files,
-
-                                allowedMentions: {
-                                    parse: []
-                                }
-                            });
-
-                        break;
-
-                    } catch (err) {
-
-                        console.log(
-                            `[SEND FAIL] ${targetLang}`
+                    const targetChannel =
+                        await client.channels.fetch(
+                            targetChannelId
                         );
 
-                        console.log(err);
+                    if (
+                        !targetChannel
+                    ) continue;
 
-                        await wait(5000);
-                    }
+                    const translatedText =
+                        await translateText(
+                            message.content,
+                            targetLang
+                        );
+
+                    const webhook =
+                        await getWebhook(
+                            targetChannel
+                        );
+
+                    if (
+                        !webhook
+                    ) continue;
+
+                    const files =
+                        [];
+
+                    message.attachments.forEach(
+                        att => {
+
+                            files.push(
+                                att.url
+                            );
+                        }
+                    );
+
+                    const sentMessage =
+                        await webhook.send({
+
+                            content:
+                                translatedText || ' ',
+
+                            username:
+                                message.member
+                                    ?.displayName
+                                ||
+                                message.author.username,
+
+                            avatarURL:
+                                message.author.displayAvatarURL(),
+
+                            files,
+
+                            allowedMentions: {
+                                parse: []
+                            }
+                        });
+
+                    messageDB[
+                        message.id
+                    ][
+                        targetChannelId
+                    ] =
+                        sentMessage.id;
+
+                    saveDB();
+
+                    await wait(500);
+
+                } catch (err) {
+
+                    console.log(
+                        '[CHANNEL ERROR]'
+                    );
+
+                    console.log(err);
                 }
-
-                if (!sentMessage) continue;
-
-                messageDB[message.id][targetChannelId] =
-                    sentMessage.id;
-
-                saveDB();
-
-                await wait(1500);
-
-            } catch (err) {
-
-                console.log(
-                    `[CHANNEL ERROR] ${targetLang}`
-                );
-
-                console.log(err);
             }
+
+        } catch (err) {
+
+            console.log(
+                '[MESSAGE ERROR]'
+            );
+
+            console.log(err);
         }
-
-    } catch (err) {
-
-        console.log(
-            '[MESSAGE CREATE ERROR]'
-        );
-
-        console.log(err);
     }
-});
+);
 
 /* =======================================================
    MESSAGE UPDATE
@@ -407,24 +509,34 @@ client.on('messageCreate', async (message) => {
 
 client.on(
     'messageUpdate',
-    async (oldMessage, newMessage) => {
+    async (
+        oldMessage,
+        newMessage
+    ) => {
 
         try {
 
-            if (newMessage.author?.bot) return;
+            if (
+                newMessage.author?.bot
+            ) return;
 
             const translations =
-                messageDB[newMessage.id];
+                messageDB[
+                    newMessage.id
+                ];
 
-            if (!translations) return;
-
-            console.log(
-                `[UPDATE] ${newMessage.id}`
-            );
+            if (
+                !translations
+            ) return;
 
             for (
-                const [targetChannelId, translatedMessageId]
-                of Object.entries(translations)
+                const [
+                    targetChannelId,
+                    translatedMessageId
+                ]
+                of Object.entries(
+                    translations
+                )
             ) {
 
                 try {
@@ -434,12 +546,16 @@ client.on(
                             targetChannelId
                         );
 
-                    if (!targetChannel) continue;
+                    if (
+                        !targetChannel
+                    ) continue;
 
                     const translatedText =
                         await translateText(
                             newMessage.content,
-                            CHANNELS[targetChannelId]
+                            CHANNELS[
+                                targetChannelId
+                            ]
                         );
 
                     const targetMessage =
@@ -447,14 +563,17 @@ client.on(
                             translatedMessageId
                         );
 
-                    if (!targetMessage) continue;
+                    if (
+                        !targetMessage
+                    ) continue;
 
                     await targetMessage.edit({
+
                         content:
                             translatedText || ' '
                     });
 
-                    await wait(1000);
+                    await wait(500);
 
                 } catch (err) {
 
@@ -469,7 +588,7 @@ client.on(
         } catch (err) {
 
             console.log(
-                '[MESSAGE UPDATE ERROR]'
+                '[UPDATE ERROR]'
             );
 
             console.log(err);
@@ -488,17 +607,22 @@ client.on(
         try {
 
             const translations =
-                messageDB[message.id];
+                messageDB[
+                    message.id
+                ];
 
-            if (!translations) return;
-
-            console.log(
-                `[DELETE] ${message.id}`
-            );
+            if (
+                !translations
+            ) return;
 
             for (
-                const [targetChannelId, translatedMessageId]
-                of Object.entries(translations)
+                const [
+                    targetChannelId,
+                    translatedMessageId
+                ]
+                of Object.entries(
+                    translations
+                )
             ) {
 
                 try {
@@ -508,14 +632,18 @@ client.on(
                             targetChannelId
                         );
 
-                    if (!targetChannel) continue;
+                    if (
+                        !targetChannel
+                    ) continue;
 
                     const targetMessage =
                         await targetChannel.messages.fetch(
                             translatedMessageId
                         );
 
-                    if (targetMessage) {
+                    if (
+                        targetMessage
+                    ) {
 
                         await targetMessage.delete();
                     }
@@ -530,14 +658,16 @@ client.on(
                 }
             }
 
-            delete messageDB[message.id];
+            delete messageDB[
+                message.id
+            ];
 
             saveDB();
 
         } catch (err) {
 
             console.log(
-                '[MESSAGE DELETE ERROR]'
+                '[DELETE ERROR]'
             );
 
             console.log(err);
@@ -549,4 +679,6 @@ client.on(
    LOGIN
 ======================================================= */
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(
+    process.env.DISCORD_TOKEN
+);
