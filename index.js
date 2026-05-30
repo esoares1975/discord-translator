@@ -13,6 +13,32 @@ const {
     WebhookClient
 } = require('discord.js');
 
+const MAX_DB_SIZE = 2000;
+
+const translationCache = new Map();
+
+setInterval(() => {
+
+    const mem = process.memoryUsage();
+
+    console.log(
+        `[RAM] ${Math.round(mem.heapUsed / 1024 / 1024)} MB`
+    );
+
+}, 60000);
+
+setInterval(() => {
+
+    translationCache.clear();
+
+}, 1000 * 60 * 30);
+
+setInterval(() => {
+
+    webhookCache.clear();
+
+}, 1000 * 60 * 30);
+
 /* =======================================================
    CONFIG
 ======================================================= */
@@ -129,7 +155,7 @@ setInterval(() => {
         const keys =
             Object.keys(messageDB);
 
-        if (keys.length > 5000) {
+        if (keys.length > MAX_DB_SIZE) {
 
             console.log(
                 '[LIMPEZA] messages.json'
@@ -159,6 +185,37 @@ setInterval(() => {
 
 function wait(ms) {
 
+    async function sendWithRetry(
+    webhook,
+    payload
+    ) {
+
+    for (
+        let i = 1;
+        i <= 3;
+        i++
+    ) {
+
+        try {
+
+            return await webhook.send(
+                payload
+            );
+
+        } catch (err) {
+
+            console.log(
+                `[SEND FAIL ${i}]`
+            );
+
+            await wait(
+                i * 1000
+            );
+        }
+    }
+
+    return null;
+}
     return new Promise(resolve =>
         setTimeout(resolve, ms)
     );
@@ -168,26 +225,40 @@ function wait(ms) {
    TRANSLATE
 ======================================================= */
 
-async function translateText(
-    text,
-    targetLang
-) {
+async function translateText(text, targetLang) {
 
     if (!text || !text.trim()) {
         return '';
     }
 
+    const cacheKey =
+        `${targetLang}:${text}`;
+
+    if (
+        translationCache.has(cacheKey)
+    ) {
+
+        return translationCache.get(
+            cacheKey
+        );
+    }
+
     for (
         let attempt = 1;
-        attempt <= 2;
+        attempt <= 3;
         attempt++
     ) {
 
         try {
 
-            console.log(
-                `[DeepL] ${targetLang}`
-            );
+            const controller =
+                new AbortController();
+
+            const timeout =
+                setTimeout(
+                    () => controller.abort(),
+                    15000
+                );
 
             const response =
                 await fetch(
@@ -196,9 +267,14 @@ async function translateText(
 
                         method: 'POST',
 
+                        signal:
+                            controller.signal,
+
                         headers: {
-                            'Authorization':
+
+                            Authorization:
                                 `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+
                             'Content-Type':
                                 'application/json'
                         },
@@ -206,19 +282,20 @@ async function translateText(
                         body: JSON.stringify({
 
                             text: [text],
+
                             target_lang:
                                 targetLang
                         })
                     }
                 );
 
+            clearTimeout(timeout);
+
             if (!response.ok) {
 
-                console.log(
-                    `[DeepL ERROR] ${response.status}`
+                await wait(
+                    attempt * 1000
                 );
-
-                await wait(1000);
 
                 continue;
             }
@@ -227,24 +304,26 @@ async function translateText(
                 await response.json();
 
             if (
-                data.translations &&
-                data.translations.length
+                data.translations?.length
             ) {
 
-                return data
-                    .translations[0]
-                    .text;
+                const translated =
+                    data.translations[0]
+                        .text;
+
+                translationCache.set(
+                    cacheKey,
+                    translated
+                );
+
+                return translated;
             }
 
-        } catch (err) {
+        } catch {
 
-            console.log(
-                '[DeepL FAIL]'
+            await wait(
+                attempt * 1000
             );
-
-            console.log(err);
-
-            await wait(1000);
         }
     }
 
@@ -376,6 +455,11 @@ client.on(
             if (
                 message.webhookId
             ) return;
+         
+            if (
+                !message.content &&
+                message.attachments.size === 0
+            ) return;
 
             if (
                 !CHANNELS[
@@ -461,8 +545,10 @@ client.on(
                             '↪ Resposta a uma mensagem\n\n';
                     }
 
-                    const sentMessage =
-                        await webhook.send({
+                   const sentMessage =
+                        await sendWithRetry(
+                        webhook,
+                        {
 
                             content:
                                 replyText +
@@ -487,37 +573,45 @@ client.on(
                             }
                         });
 
-                    messageDB[
-                        message.id
-                    ][
-                        targetChannelId
-                    ] =
-                        sentMessage.id;
+                        messageDB[
+                            message.id
+                        ][
+                            targetChannelId
+                        ] =
+                            sentMessage.id;
 
-                    saveDB();
+                        
 
-                    await wait(500);
+                        await wait(150);
 
-                } catch (err) {
+                    } catch (err) {
 
-                    console.log(
-                        '[CHANNEL ERROR]'
-                    );
+                        console.log(
+                            '[CHANNEL ERROR]'
+                        );
 
-                    console.log(err);
+                        console.log(err);
+                    }
                 }
+                
+            } catch (err) {
+
+                console.log(
+                    '[MESSAGE ERROR]'
+                );
+
+                console.log(err);
             }
-
-        } catch (err) {
-
-            console.log(
-                '[MESSAGE ERROR]'
+ 
+            if (!sentMessage) {
+                console.log(
+                '[ERRO] envio falhou'
             );
-
-            console.log(err);
+            continue;
+            }
+        saveDB();
         }
-    }
-);
+    );
 
 /* =======================================================
    MESSAGE UPDATE
@@ -698,3 +792,11 @@ client.on(
 client.login(
     process.env.DISCORD_TOKEN
 );
+
+setInterval(() => {
+    if (
+        global.gc
+    ) {
+        global.gc();
+    }
+}, 1000 * 60 * 5);
