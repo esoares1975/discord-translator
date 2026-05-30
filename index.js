@@ -607,7 +607,7 @@ client.on(
                 console.log(
                 '[ERRO] envio falhou'
             );
-            continue;
+            return;
             }
         saveDB();
         }
