@@ -448,24 +448,24 @@ client.on(
 
         try {
 
-            if (
-                message.author.bot
-            ) return;
+            if (message.author.bot)
+                return;
 
-            if (
-                message.webhookId
-            ) return;
-         
+            if (message.webhookId)
+                return;
+
             if (
                 !message.content &&
                 message.attachments.size === 0
-            ) return;
+            )
+                return;
 
             if (
                 !CHANNELS[
                     message.channel.id
                 ]
-            ) return;
+            )
+                return;
 
             console.log(
                 `[MSG] ${message.author.username}`
@@ -497,7 +497,9 @@ client.on(
                     if (
                         targetChannelId ===
                         message.channel.id
-                    ) continue;
+                    ) {
+                        continue;
+                    }
 
                     const targetChannel =
                         await client.channels.fetch(
@@ -506,13 +508,23 @@ client.on(
 
                     if (
                         !targetChannel
-                    ) continue;
+                    ) {
+                        continue;
+                    }
 
-                    const translatedText =
-                        await translateText(
-                            message.content,
-                            targetLang
-                        );
+                    let translatedText =
+                        message.content;
+
+                    if (
+                        message.content
+                    ) {
+
+                        translatedText =
+                            await translateText(
+                                message.content,
+                                targetLang
+                            );
+                    }
 
                     const webhook =
                         await getWebhook(
@@ -521,19 +533,26 @@ client.on(
 
                     if (
                         !webhook
-                    ) continue;
+                    ) {
 
-                    const files =
-                        [];
+                        console.log(
+                            `[WEBHOOK FAIL] ${targetChannelId}`
+                        );
 
-                    message.attachments.forEach(
-                        att => {
+                        continue;
+                    }
 
-                            files.push(
-                                att.url
-                            );
-                        }
-                    );
+                    const files = [];
+
+                    for (
+                        const attachment
+                        of message.attachments.values()
+                    ) {
+
+                        files.push(
+                            attachment.url
+                        );
+                    }
 
                     let replyText = '';
 
@@ -545,73 +564,77 @@ client.on(
                             '↪ Resposta a uma mensagem\n\n';
                     }
 
-                   const sentMessage =
+                    const sentMessage =
                         await sendWithRetry(
-                        webhook,
-                        {
+                            webhook,
+                            {
 
-                            content:
-                                replyText +
-                                (
-                                    translatedText ||
-                                    ' '
-                                ),
+                                content:
+                                    replyText +
+                                    (
+                                        translatedText ||
+                                        ' '
+                                    ),
 
-                            username:
-                                message.member
-                                    ?.displayName
-                                ||
-                                message.author.username,
+                                username:
+                                    message.member
+                                        ?.displayName
+                                    ||
+                                    message.author.username,
 
-                            avatarURL:
-                                message.author.displayAvatarURL(),
+                                avatarURL:
+                                    message.author.displayAvatarURL(),
 
-                            files,
+                                files,
 
-                            allowedMentions: {
-                                parse: []
+                                allowedMentions: {
+                                    parse: []
+                                }
                             }
-                        });
-
-                        messageDB[
-                            message.id
-                        ][
-                            targetChannelId
-                        ] =
-                            sentMessage.id;
-
-                        
-
-                        await wait(150);
-
-                    } catch (err) {
-
-                        console.log(
-                            '[CHANNEL ERROR]'
                         );
 
-                        console.log(err);
+                    if (
+                        !sentMessage
+                    ) {
+
+                        console.log(
+                            `[ERRO] envio falhou para ${targetChannelId}`
+                        );
+
+                        continue;
                     }
+
+                    messageDB[
+                        message.id
+                    ][
+                        targetChannelId
+                    ] =
+                        sentMessage.id;
+
+                    saveDB();
+
+                    await wait(150);
+
+                } catch (err) {
+
+                    console.log(
+                        `[CHANNEL ERROR] ${targetChannelId}`
+                    );
+
+                    console.log(err);
                 }
-                
-            } catch (err) {
-
-                console.log(
-                    '[MESSAGE ERROR]'
-                );
-
-                console.log(err);
             }
- 
-            if (!sentMessage) {
-                console.log(
-                '[ERRO] envio falhou'
+
+        } catch (err) {
+
+            console.log(
+                '[MESSAGE ERROR]'
             );
-            return;
-            }
-        saveDB();
+
+            console.log(err);
         }
-    );
+    }
+);
 
 /* =======================================================
    MESSAGE UPDATE
