@@ -185,15 +185,20 @@ setInterval(() => {
 
 function wait(ms) {
 
-    async function sendWithRetry(
+    return new Promise(resolve =>
+        setTimeout(resolve, ms)
+    );
+}
+
+async function sendWithRetry(
     webhook,
     payload
-    ) {
+) {
 
     for (
-        let i = 1;
-        i <= 3;
-        i++
+        let attempt = 1;
+        attempt <= 3;
+        attempt++
     ) {
 
         try {
@@ -205,20 +210,24 @@ function wait(ms) {
         } catch (err) {
 
             console.log(
-                `[SEND FAIL ${i}]`
+                `[WEBHOOK RETRY ${attempt}]`
+            );
+
+            console.log(
+                err.message
             );
 
             await wait(
-                i * 1000
+                attempt * 1000
             );
         }
     }
 
-    return null;
-}
-    return new Promise(resolve =>
-        setTimeout(resolve, ms)
+    console.log(
+        '[WEBHOOK FAILED AFTER 3 ATTEMPTS]'
     );
+
+    return null;
 }
 
 /* =======================================================
@@ -567,39 +576,37 @@ client.on(
                     const sentMessage =
                         await sendWithRetry(
                             webhook,
-                            {
+                        {
 
-                                content:
-                                    replyText +
-                                    (
-                                        translatedText ||
-                                        ' '
-                                    ),
+                            content:
+                                replyText +
+                                (
+                                    translatedText ||
+                                    ' '
+                                ),
 
-                                username:
-                                    message.member
-                                        ?.displayName
-                                    ||
-                                    message.author.username,
+                            username:
+                                message.member
+                                    ?.displayName
+                                ||
+                                message.author.username,
 
-                                avatarURL:
-                                    message.author.displayAvatarURL(),
+                            avatarURL:
+                                message.author.displayAvatarURL(),
 
-                                files,
+                            files,
 
-                                allowedMentions: {
-                                    parse: []
-                                }
+                            allowedMentions: {
+                            parse: []
                             }
-                        );
+                        }
+                    );
 
-                    if (
-                        !sentMessage
-                    ) {
+                   if (!sentMessage) {
 
-                        console.log(
-                            `[ERRO] envio falhou para ${targetChannelId}`
-                        );
+                    console.log(
+                        `[ERRO] envio falhou para ${targetChannelId}`
+                    );
 
                         continue;
                     }
