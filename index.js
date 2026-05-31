@@ -634,50 +634,52 @@ client.on(
 
                     const sentMessages =
                         await sendLongMessage(
-                        webhook,
-                    {
-                        content:
-                            replyText +
-                    (
-                        translatedText ||
-                        ' '
-                    ),
+                            webhook,
+                            {
+                                content:
+                                    replyText +
+                                    (
+                                        translatedText ||
+                                        ' '
+                                    ),
 
-                        username:
-                            message.member
-                            ?.displayName
-                            ||
-                            message.author.username,
+                                username:
+                                    message.member
+                                        ?.displayName
+                                    ||
+                                    message.author.username,
 
-                        avatarURL:
-                            message.author.displayAvatarURL(),
+                                avatarURL:
+                                    message.author.displayAvatarURL(),
 
-                        files,
+                                files,
 
-                        allowedMentions: {
-                        parse: []
+                                allowedMentions: {
+                                    parse: []
+                                }
                             }
-                        }
-                    );
+                        );
 
-                   if (
+                    if (
                         !sentMessages ||
                         sentMessages.length === 0
                     ) {
 
                         console.log(
-                        `[ERRO] envio falhou para ${targetChannelId}`
+                            `[ERRO] envio falhou para ${targetChannelId}`
                         );
 
-                    continue;
+                        continue;
                     }
 
                     messageDB[
-                    message.id
+                        message.id
                     ][
-                    targetChannelId
+                        targetChannelId
                     ] =
-                    sentMessages[0].id;
+                        sentMessages.map(
+                            msg => msg.id
+                        );
 
                     saveDB();
 
