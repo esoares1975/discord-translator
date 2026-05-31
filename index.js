@@ -230,6 +230,65 @@ async function sendWithRetry(
     return null;
 }
 
+async function sendLongMessage(
+    webhook,
+    payload
+) {
+
+    const content =
+        payload.content || '';
+
+    if (content.length <= 2000) {
+
+        const msg =
+            await sendWithRetry(
+                webhook,
+                payload
+            );
+
+        return msg ? [msg] : [];
+    }
+
+    const messages = [];
+
+    for (
+        let i = 0;
+        i < content.length;
+        i += 1900
+    ) {
+
+        const chunk =
+            content.slice(
+                i,
+                i + 1900
+            );
+
+        const msg =
+            await sendWithRetry(
+                webhook,
+                {
+                    ...payload,
+
+                    content: chunk,
+
+                    files:
+                        i === 0
+                            ? payload.files
+                            : []
+                }
+            );
+
+        if (msg) {
+
+            messages.push(msg);
+        }
+
+        await wait(250);
+    }
+
+    return messages;
+}
+
 /* =======================================================
    TRANSLATE
 ======================================================= */
@@ -573,50 +632,52 @@ client.on(
                             '↪ Resposta a uma mensagem\n\n';
                     }
 
-                    const sentMessage =
-                        await sendWithRetry(
-                            webhook,
-                        {
+                    const sentMessages =
+                        await sendLongMessage(
+                        webhook,
+                    {
+                        content:
+                            replyText +
+                    (
+                        translatedText ||
+                        ' '
+                    ),
 
-                            content:
-                                replyText +
-                                (
-                                    translatedText ||
-                                    ' '
-                                ),
+                        username:
+                            message.member
+                            ?.displayName
+                            ||
+                            message.author.username,
 
-                            username:
-                                message.member
-                                    ?.displayName
-                                ||
-                                message.author.username,
+                        avatarURL:
+                            message.author.displayAvatarURL(),
 
-                            avatarURL:
-                                message.author.displayAvatarURL(),
+                        files,
 
-                            files,
-
-                            allowedMentions: {
-                            parse: []
+                        allowedMentions: {
+                        parse: []
                             }
                         }
                     );
 
-                   if (!sentMessage) {
+                   if (
+                        !sentMessages ||
+                        sentMessages.length === 0
+                    ) {
 
-                    console.log(
+                        console.log(
                         `[ERRO] envio falhou para ${targetChannelId}`
-                    );
+                        );
 
-                        continue;
+                    continue;
                     }
 
                     messageDB[
-                        message.id
+                    message.id
                     ][
-                        targetChannelId
+                    targetChannelId
                     ] =
-                        sentMessage.id;
+                    sentMessages[0].id;
 
                     saveDB();
 
